@@ -2,7 +2,8 @@ import argparse
 import heapq
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Optional
+import math
 
 DATA_PATH = Path.cwd() / "data" / "SPP.csv"
 VALID_COST_METHODS = {"weighted", "lexic", "mixture"}
@@ -20,6 +21,9 @@ class Costs:
             self.emission + other.emission,
             self.risk + other.risk,
         )
+
+    def to_list(self) -> List[int]:
+        return [self.distance, self.emission, self.risk]
 
 
 @dataclass
@@ -41,12 +45,21 @@ class PathToNode:
 
 def arguments_santiy_check(args: dict) -> None:
     """Check arguments."""
+
     if args["cost_method"] not in VALID_COST_METHODS:
         raise ValueError(
             "Invalid cost method. Valid methods are: weighted, lexic, mixture."
         )
+
     if len(args["weights"]) != 3:
         raise ValueError("Weights must have 3 values.")
+
+    if len(args["order"]) != 3:
+        raise ValueError("Order must have 3 values.")
+
+    for num in [1, 2, 3]:
+        if num not in args["order"]:
+            raise ValueError("Order must have 3 values from 1 to 3.")
 
     # Normalize weights
     total_sum = sum(args["weights"])
@@ -60,7 +73,7 @@ def parse_arguments() -> dict:
         "--cost-method",
         type=str,
         nargs="+",
-        default="weighted",
+        default="lexic",
         help="Method to evaluate path costs.",
     )
     parser.add_argument(
@@ -69,6 +82,13 @@ def parse_arguments() -> dict:
         nargs="+",
         default=[1, 1, 1],
         help="Weights to evaluate path costs.",
+    )
+    parser.add_argument(
+        "--order",
+        type=int,
+        nargs="+",
+        default=[1, 2, 3],
+        help="Order to evaluate path costs.",
     )
     args = vars(parser.parse_args())
     arguments_santiy_check(args)
@@ -112,27 +132,38 @@ def read_data(path: Path) -> Tuple[int, Dict[int, Node]]:
 
 
 def create_new_path(
-    cur_path: PathToNode, to_node: Node, cost_method: str, weights: List[float] = []
-) -> PathToNode:
+    cur_path: PathToNode, to_node: Node, cost_method: str, weights: List[float] = [], constraints: List[float] = []
+) -> Tuple[PathToNode, Optional[bool]]:
     """Create new path to node."""
+
     new_costs = cur_path.costs + to_node.costs
-    if cost_method == "weighted":
-        new_total_cost = (
-            new_costs.distance * weights[0]
-            + new_costs.emission * weights[1]
-            + new_costs.risk * weights[2]
-        )
-    elif cost_method == "lexic":
-        raise NotImplementedError("Pending to implement")
+
+    new_total_cost = (
+        new_costs.distance * weights[0]
+        + new_costs.emission * weights[1]
+        + new_costs.risk * weights[2]
+    )
+
+    is_feasible = True
+
+    if cost_method == "lexic":
+
+        violation = []
+        for new_cost, constraint in zip(new_costs.to_list(), constraints):
+            violation.append(new_cost <= constraint)
+        is_feasible = all(violation)
+
     else:
         raise NotImplementedError("Pending to implement")
+
     new_path = PathToNode(
         to_node.cur_node,
         new_costs,
         new_total_cost,
         cur_path.path + [to_node.cur_node],
     )
-    return new_path
+
+    return new_path, is_feasible
 
 
 def dijkstra(end_node: int, paths: Dict[int, Node], cost_kwargs: dict) -> PathToNode:
@@ -149,14 +180,59 @@ def dijkstra(end_node: int, paths: Dict[int, Node], cost_kwargs: dict) -> PathTo
             visited.add(cur_node)
             for to_node in paths[cur_node]:
                 if to_node.cur_node not in visited:
-                    new_path = create_new_path(cur_path, to_node, **cost_kwargs)
+                    new_path, is_feasible = create_new_path(cur_path, to_node, **cost_kwargs)
+                    if not is_feasible:
+                        return "No feasible path found."
                     heapq.heappush(priority_queue, new_path)
                     if new_path.cur_node == end_node:
                         return new_path
 
 
+def lexicographic_method(end_node: int, paths: Dict[int, Node], args: dict):
+
+    # Order in which objectives will be prioritized
+    order = []
+    for num in args['order']:
+        weights = [0, 0, 0]
+        weights[num-1] = 1
+        order.append(weights)
+
+    # Remove order from args to avoid errors
+    del args['order']
+
+    # Auxiliary variables to keep track of the last optimal solution
+    last_shortest_path = PathToNode(0, Costs(0, 0, 0), math.inf, [])
+    args['constraints'] = [math.inf]*3
+
+    # Optimize objectives in the specified order
+    for i, weights in enumerate(order):
+
+        # Update weights to optimize current objective
+        args['weights'] = weights
+
+        # Update constraints to preserve previous optimal solution
+        args['constraints'][weights.index(1)] = last_shortest_path.total_cost
+
+        # Find shortest path
+        shortest_path = dijkstra(end_node, paths, args)
+
+        if isinstance(shortest_path, str):
+            # If no feasible solution is found, stop the algorithm
+            print("There is no feasible solution that preserves previous optimal solution.")
+            print(f"The previous optimal solution will be returned. It optimized the first {i} objectives.")
+            break
+
+        # Update last optimal solution
+        last_shortest_path = shortest_path
+
+    return last_shortest_path
+
 if __name__ == "__main__":
     args = parse_arguments()
     n_nodes, paths = read_data(DATA_PATH)
-    shortest_path = dijkstra(n_nodes, paths, args)
+    if args['cost_method'] == 'weighted':
+        shortest_path = dijkstra(n_nodes, paths, args)
+    elif args['cost_method'] == 'lexic':
+        shortest_path = lexicographic_method(n_nodes, paths, args)
     print(shortest_path)
+
