@@ -25,6 +25,9 @@ class Costs:
     def to_list(self) -> List[int]:
         return [self.distance, self.emission, self.risk]
 
+    def __repr__(self) -> str:
+        return f"distance={self.distance}, emission={self.emission}, risk={self.risk},"
+
 
 @dataclass
 class Node:
@@ -42,28 +45,34 @@ class PathToNode:
     def __lt__(self, other: "PathToNode") -> bool:
         return self.total_cost < other.total_cost
 
+    def __repr__(self) -> str:
+        return f"Path to node {self.cur_node} with costs {self.costs} and total cost {self.total_cost}."
 
-def arguments_santiy_check(args: dict) -> None:
+
+def arguments_santiy_check(kwargs: dict) -> None:
     """Check arguments validity."""
 
-    if args["cost_method"] not in VALID_COST_METHODS:
+    if kwargs["cost_method"] not in VALID_COST_METHODS:
         raise ValueError(
             "Invalid cost method. Valid methods are: weighted, lexic, mixture."
         )
 
-    if len(args["weights"]) != 3:
+    if len(kwargs["weights"]) != 3:
         raise ValueError("Weights must have 3 values.")
 
-    if len(args["order"]) != 3:
+    if len(kwargs["order"]) != 3:
         raise ValueError("Order must have 3 values.")
 
     for num in [1, 2, 3]:
-        if num not in args["order"]:
+        if num not in kwargs["order"]:
             raise ValueError("Order must have 3 values from 1 to 3.")
 
+    if kwargs["mixture_weight"] < 0.5 or kwargs["mixture_weight"] > 1:
+        raise ValueError("Mixture weight must be between 0 and 1.")
+
     # Normalize weights
-    total_sum = sum(args["weights"])
-    args["weights"] = [weight / total_sum for weight in args["weights"]]
+    total_sum = sum(kwargs["weights"])
+    kwargs["weights"] = [weight / total_sum for weight in kwargs["weights"]]
 
 
 def parse_arguments() -> dict:
@@ -72,8 +81,7 @@ def parse_arguments() -> dict:
     parser.add_argument(
         "--cost-method",
         type=str,
-        nargs="+",
-        default="lexic",
+        default="mixture",
         help="Method to evaluate path costs.",
     )
     parser.add_argument(
@@ -90,9 +98,15 @@ def parse_arguments() -> dict:
         default=[1, 2, 3],
         help="Order to evaluate path costs.",
     )
-    args = vars(parser.parse_args())
-    arguments_santiy_check(args)
-    return args
+    parser.add_argument(
+        "--mixture-weight",
+        type=float,
+        default=0.7,
+        help="Weight to give to objectives in squential algorithm.",
+    )
+    kwargs = vars(parser.parse_args())
+    arguments_santiy_check(kwargs)
+    return kwargs
 
 
 def parse_line(line: str) -> Tuple[Node, Node]:
@@ -161,16 +175,12 @@ def create_new_path(
 
     is_feasible = True
 
-    if cost_method == "lexic":
-
+    if cost_method != "weighted":
         # Check if new path maintains optimal cost for previous objectives
         violation = []
         for new_cost, constraint in zip(new_costs.to_list(), constraints):
             violation.append(new_cost <= constraint)
         is_feasible = all(violation)
-
-    else:
-        raise NotImplementedError("Pending to implement")
 
     # Create new path with information
     new_path = PathToNode(
@@ -186,6 +196,13 @@ def create_new_path(
 def dijkstra(end_node: int, paths: Dict[int, Node], cost_kwargs: dict) -> PathToNode:
     """Dijkstra algorithm to find shortest path."""
 
+    # Remove order from cost_kwargs to avoid errors
+    if "order" in cost_kwargs:
+        del cost_kwargs["order"]
+
+    if "mixture_weight" in cost_kwargs:
+        del cost_kwargs["mixture_weight"]
+
     # Initialize variables
     visited = set()
     cur_path = PathToNode(1, Costs(0, 0, 0), 0, [1])
@@ -195,7 +212,6 @@ def dijkstra(end_node: int, paths: Dict[int, Node], cost_kwargs: dict) -> PathTo
     heapq.heapify(priority_queue)
 
     while priority_queue:
-
         # Get shortest path
         cur_path = heapq.heappop(priority_queue)
         cur_node = cur_path.cur_node
@@ -225,24 +241,25 @@ def dijkstra(end_node: int, paths: Dict[int, Node], cost_kwargs: dict) -> PathTo
 
 
 def sequential_optimization(
-    order: List[List[float]], end_node: int, paths: Dict[int, Node], cost_args: dict
+    order: List[List[float]], end_node: int, paths: Dict[int, Node], cost_kwargs: dict
 ) -> PathToNode:
     """Sequential optimization algorithm."""
 
     # Auxiliary variables to keep track of the last optimal solution
     last_shortest_path = PathToNode(0, Costs(0, 0, 0), math.inf, [])
-    cost_args["constraints"] = [math.inf] * 3
+    cost_kwargs["constraints"] = [math.inf] * 3
 
     # Optimize objectives in the specified order
     for i, weights in enumerate(order):
         # Update weights to optimize current objective
-        cost_args["weights"] = weights
+        cost_kwargs["weights"] = weights
 
         # Update constraints to preserve previous optimal solution
-        cost_args["constraints"][weights.index(1)] = last_shortest_path.total_cost
+        max_num = max(weights)
+        cost_kwargs["constraints"][weights.index(max_num)] = last_shortest_path.total_cost
 
         # Find shortest path
-        shortest_path = dijkstra(end_node, paths, cost_args)
+        shortest_path = dijkstra(end_node, paths, cost_kwargs)
 
         if isinstance(shortest_path, str):
             # If no feasible solution is found, stop the algorithm
@@ -252,6 +269,7 @@ def sequential_optimization(
             print(
                 f"The previous optimal solution will be returned. It optimized the first {i} objectives."
             )
+            print()
             break
 
         # Update last optimal solution
@@ -261,44 +279,43 @@ def sequential_optimization(
 
 
 def lexicographic_method(
-    end_node: int, paths: Dict[int, Node], args: dict
+    end_node: int, paths: Dict[int, Node], kwargs: dict
 ) -> PathToNode:
     """Lexicographic method to find shortest path."""
 
     # Order in which objectives will be prioritized
     order = []
-    for num in args["order"]:
+    for num in kwargs["order"]:
+        # Set weights to 1 for the objective being optimized and 0 for the rest
         weights = [0, 0, 0]
         weights[num - 1] = 1
         order.append(weights)
 
-    # Remove order from args to avoid errors
-    del args["order"]
-
-    return sequential_optimization(order, end_node, paths, args)
+    return sequential_optimization(order, end_node, paths, kwargs)
 
 
-def mixture_method(end_node: int, paths: Dict[int, Node], args: dict) -> PathToNode:
+def mixture_method(end_node: int, paths: Dict[int, Node], kwargs: dict) -> PathToNode:
+    """Mixture method to find shortest path."""
+
     # Order in which objectives will be prioritized
     order = []
-    for num in args["order"]:
-        weights = [0, 0, 0]
-        weights[num - 1] = 1
+    for num in kwargs["order"]:
+        # Set the optimized objective to the specified mixture weight and the rest to
+        # the remaining weights equally divided
+        weights = [(1 - kwargs["mixture_weight"]) / 2] * 3
+        weights[num - 1] = kwargs["mixture_weight"]
         order.append(weights)
 
-    # Remove order from args to avoid errors
-    del args["order"]
-
-    return sequential_optimization(order, end_node, paths, args)
+    return sequential_optimization(order, end_node, paths, kwargs)
 
 
 if __name__ == "__main__":
-    args = parse_arguments()
+    kwargs = parse_arguments()
     n_nodes, paths = read_data(DATA_PATH)
-    if args["cost_method"] == "weighted":
-        shortest_path = dijkstra(n_nodes, paths, args)
-    elif args["cost_method"] == "lexic":
-        shortest_path = lexicographic_method(n_nodes, paths, args)
+    if kwargs["cost_method"] == "weighted":
+        shortest_path = dijkstra(n_nodes, paths, kwargs)
+    elif kwargs["cost_method"] == "lexic":
+        shortest_path = lexicographic_method(n_nodes, paths, kwargs)
     else:
-        shortest_path = mixture_method(n_nodes, paths, args)
+        shortest_path = mixture_method(n_nodes, paths, kwargs)
     print(shortest_path)
