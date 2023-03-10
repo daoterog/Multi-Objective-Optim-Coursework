@@ -44,7 +44,7 @@ class PathToNode:
 
 
 def arguments_santiy_check(args: dict) -> None:
-    """Check arguments."""
+    """Check arguments validity."""
 
     if args["cost_method"] not in VALID_COST_METHODS:
         raise ValueError(
@@ -97,12 +97,19 @@ def parse_arguments() -> dict:
 
 def parse_line(line: str) -> Tuple[Node, Node]:
     """Parse line from csv file and return two nodes."""
+
+    # Retrieve data from line
     node1, node2, distance, emission, risk = line.split(",")
+
+    # Convert data to correct type
     node1, node2 = int(node1), int(node2)
     distance, emission, risk = float(distance), float(emission), float(risk)
+
+    # Create Costs and Node objects
     costs = Costs(distance, emission, risk)
     node1 = Node(node1, costs)
     node2 = Node(node2, costs)
+
     return node1, node2
 
 
@@ -112,8 +119,10 @@ def read_data(path: Path) -> Tuple[int, Dict[int, Node]]:
     with open(path, "r") as f:
         lines = f.read().split("\n")
 
+        # Retrieve number of nodes
         n_nodes = int(lines[0].split(",")[0][-3:])
 
+        # Create dictionary every possible paths
         paths = {}
         for line in lines[1:]:
             node1, node2 = parse_line(line)
@@ -132,12 +141,18 @@ def read_data(path: Path) -> Tuple[int, Dict[int, Node]]:
 
 
 def create_new_path(
-    cur_path: PathToNode, to_node: Node, cost_method: str, weights: List[float] = [], constraints: List[float] = []
+    cur_path: PathToNode,
+    to_node: Node,
+    cost_method: str,
+    weights: List[float] = [],
+    constraints: List[float] = [],
 ) -> Tuple[PathToNode, Optional[bool]]:
     """Create new path to node."""
 
+    # Recalculating costs with new node
     new_costs = cur_path.costs + to_node.costs
 
+    # Computing weighted average
     new_total_cost = (
         new_costs.distance * weights[0]
         + new_costs.emission * weights[1]
@@ -148,6 +163,7 @@ def create_new_path(
 
     if cost_method == "lexic":
 
+        # Check if new path maintains optimal cost for previous objectives
         violation = []
         for new_cost, constraint in zip(new_costs.to_list(), constraints):
             violation.append(new_cost <= constraint)
@@ -156,6 +172,7 @@ def create_new_path(
     else:
         raise NotImplementedError("Pending to implement")
 
+    # Create new path with information
     new_path = PathToNode(
         to_node.cur_node,
         new_costs,
@@ -168,58 +185,73 @@ def create_new_path(
 
 def dijkstra(end_node: int, paths: Dict[int, Node], cost_kwargs: dict) -> PathToNode:
     """Dijkstra algorithm to find shortest path."""
+
+    # Initialize variables
     visited = set()
     cur_path = PathToNode(1, Costs(0, 0, 0), 0, [1])
     priority_queue = [cur_path]
+
+    #  Use priority queue to find shortest path
     heapq.heapify(priority_queue)
 
     while priority_queue:
+
+        # Get shortest path
         cur_path = heapq.heappop(priority_queue)
         cur_node = cur_path.cur_node
+
         if cur_node not in visited:
+            #  Explore if node has not been visited
             visited.add(cur_node)
             for to_node in paths[cur_node]:
+                # Explore all possible paths
                 if to_node.cur_node not in visited:
-                    new_path, is_feasible = create_new_path(cur_path, to_node, **cost_kwargs)
+                    # Create new path if node has not been visited
+                    new_path, is_feasible = create_new_path(
+                        cur_path, to_node, **cost_kwargs
+                    )
                     if not is_feasible:
-                        return "No feasible path found."
-                    heapq.heappush(priority_queue, new_path)
+                        # Continue exploring other paths if new path is not feasible
+                        continue
                     if new_path.cur_node == end_node:
+                        # Return path if it reaches the end node
                         return new_path
+                    # Add new path to priority queue only if it is feasible and has not
+                    # reached the end node yet
+                    heapq.heappush(priority_queue, new_path)
+
+    # Return error message if no feasible path is found
+    return "No feasible path found"
 
 
-def lexicographic_method(end_node: int, paths: Dict[int, Node], args: dict):
-
-    # Order in which objectives will be prioritized
-    order = []
-    for num in args['order']:
-        weights = [0, 0, 0]
-        weights[num-1] = 1
-        order.append(weights)
-
-    # Remove order from args to avoid errors
-    del args['order']
+def sequential_optimization(
+    order: List[List[float]], end_node: int, paths: Dict[int, Node], cost_args: dict
+) -> PathToNode:
+    """Sequential optimization algorithm."""
 
     # Auxiliary variables to keep track of the last optimal solution
     last_shortest_path = PathToNode(0, Costs(0, 0, 0), math.inf, [])
-    args['constraints'] = [math.inf]*3
+    cost_args["constraints"] = [math.inf] * 3
 
     # Optimize objectives in the specified order
     for i, weights in enumerate(order):
-
         # Update weights to optimize current objective
-        args['weights'] = weights
+        cost_args["weights"] = weights
 
         # Update constraints to preserve previous optimal solution
-        args['constraints'][weights.index(1)] = last_shortest_path.total_cost
+        cost_args["constraints"][weights.index(1)] = last_shortest_path.total_cost
 
         # Find shortest path
-        shortest_path = dijkstra(end_node, paths, args)
+        shortest_path = dijkstra(end_node, paths, cost_args)
 
         if isinstance(shortest_path, str):
             # If no feasible solution is found, stop the algorithm
-            print("There is no feasible solution that preserves previous optimal solution.")
-            print(f"The previous optimal solution will be returned. It optimized the first {i} objectives.")
+            print(
+                "There is no feasible solution that preserves previous optimal solution."
+            )
+            print(
+                f"The previous optimal solution will be returned. It optimized the first {i} objectives."
+            )
             break
 
         # Update last optimal solution
@@ -227,12 +259,46 @@ def lexicographic_method(end_node: int, paths: Dict[int, Node], args: dict):
 
     return last_shortest_path
 
+
+def lexicographic_method(
+    end_node: int, paths: Dict[int, Node], args: dict
+) -> PathToNode:
+    """Lexicographic method to find shortest path."""
+
+    # Order in which objectives will be prioritized
+    order = []
+    for num in args["order"]:
+        weights = [0, 0, 0]
+        weights[num - 1] = 1
+        order.append(weights)
+
+    # Remove order from args to avoid errors
+    del args["order"]
+
+    return sequential_optimization(order, end_node, paths, args)
+
+
+def mixture_method(end_node: int, paths: Dict[int, Node], args: dict) -> PathToNode:
+    # Order in which objectives will be prioritized
+    order = []
+    for num in args["order"]:
+        weights = [0, 0, 0]
+        weights[num - 1] = 1
+        order.append(weights)
+
+    # Remove order from args to avoid errors
+    del args["order"]
+
+    return sequential_optimization(order, end_node, paths, args)
+
+
 if __name__ == "__main__":
     args = parse_arguments()
     n_nodes, paths = read_data(DATA_PATH)
-    if args['cost_method'] == 'weighted':
+    if args["cost_method"] == "weighted":
         shortest_path = dijkstra(n_nodes, paths, args)
-    elif args['cost_method'] == 'lexic':
+    elif args["cost_method"] == "lexic":
         shortest_path = lexicographic_method(n_nodes, paths, args)
+    else:
+        shortest_path = mixture_method(n_nodes, paths, args)
     print(shortest_path)
-
