@@ -246,7 +246,7 @@ def sequential_optimization(
     """Sequential optimization algorithm."""
 
     # Auxiliary variables to keep track of the last optimal solution
-    last_shortest_path = PathToNode(0, Costs(0, 0, 0), math.inf, [])
+    last_objective_cost = math.inf
     cost_kwargs["constraints"] = [math.inf] * 3
 
     # Optimize objectives in the specified order
@@ -256,7 +256,7 @@ def sequential_optimization(
 
         # Update constraints to preserve previous optimal solution
         max_num = max(weights)
-        cost_kwargs["constraints"][weights.index(max_num)] = last_shortest_path.total_cost
+        cost_kwargs["constraints"][weights.index(max_num)] = last_objective_cost
 
         # Find shortest path
         shortest_path = dijkstra(end_node, paths, cost_kwargs)
@@ -273,9 +273,9 @@ def sequential_optimization(
             break
 
         # Update last optimal solution
-        last_shortest_path = shortest_path
+        last_objective_cost = shortest_path.costs.to_list()[max_num]
 
-    return last_shortest_path
+    return shortest_path
 
 
 def lexicographic_method(
