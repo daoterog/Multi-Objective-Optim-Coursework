@@ -113,18 +113,18 @@ def parse_line(line: str) -> Tuple[Node, Node]:
     """Parse line from csv file and return two nodes."""
 
     # Retrieve data from line
-    node1, node2, distance, emission, risk = line.split(",")
+    node_from, node_to, distance, emission, risk = line.split(",")
 
     # Convert data to correct type
-    node1, node2 = int(node1), int(node2)
+    node_from, node_to = int(node_from), int(node_to)
     distance, emission, risk = float(distance), float(emission), float(risk)
 
     # Create Costs and Node objects
     costs = Costs(distance, emission, risk)
-    node1 = Node(node1, costs)
-    node2 = Node(node2, costs)
+    node_from = Node(node_from, costs)
+    node_to = Node(node_to, costs)
 
-    return node1, node2
+    return node_from, node_to
 
 
 def read_data(path: Path) -> Tuple[int, Dict[int, Node]]:
@@ -139,17 +139,26 @@ def read_data(path: Path) -> Tuple[int, Dict[int, Node]]:
         # Create dictionary every possible paths
         paths = {}
         for line in lines[1:]:
-            node1, node2 = parse_line(line)
+            node_from, node_to = parse_line(line)
 
-            if node1.cur_node in paths:
-                paths[node1.cur_node].append(node2)
+            if node_from.cur_node in paths:
+                paths[node_from.cur_node].append(node_to)
             else:
-                paths[node1.cur_node] = [node2]
+                paths[node_from.cur_node] = [node_to]
 
-            if node2.cur_node in paths:
-                paths[node2.cur_node].append(node1)
+            if node_to.cur_node in paths:
+
+                for i, node in enumerate(paths[node_to.cur_node]):
+                    # Iterate over the list to check if node_from is already in the list
+                    if node.cur_node == node_from.cur_node:
+                        # If node_from is already in the list then the edge is repeated
+                        # Pop repeated path out of the list
+                        paths[node_to.cur_node].pop(i)
+                        break
+
+                paths[node_to.cur_node].append(node_from)
             else:
-                paths[node2.cur_node] = [node1]
+                paths[node_to.cur_node] = [node_from]
 
     return n_nodes, paths
 
@@ -248,6 +257,7 @@ def sequential_optimization(
     # Auxiliary variables to keep track of the last optimal solution
     last_objective_cost = math.inf
     cost_kwargs["constraints"] = [math.inf] * 3
+    last_shortest_path = None
 
     # Optimize objectives in the specified order
     for i, weights in enumerate(order):
@@ -255,8 +265,8 @@ def sequential_optimization(
         cost_kwargs["weights"] = weights
 
         # Update constraints to preserve previous optimal solution
-        max_num = max(weights)
-        cost_kwargs["constraints"][weights.index(max_num)] = last_objective_cost
+        index = weights.index(max(weights))
+        cost_kwargs["constraints"][index] = last_objective_cost
 
         # Find shortest path
         shortest_path = dijkstra(end_node, paths, cost_kwargs)
@@ -270,10 +280,11 @@ def sequential_optimization(
                 f"The previous optimal solution will be returned. It optimized the first {i} objectives."
             )
             print()
-            break
+            return last_shortest_path
 
         # Update last optimal solution
-        last_objective_cost = shortest_path.costs.to_list()[max_num]
+        last_objective_cost = shortest_path.costs.to_list()[index]
+        last_shortest_path = shortest_path
 
     return shortest_path
 
