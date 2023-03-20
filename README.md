@@ -17,7 +17,7 @@ The order in which the objectives are optimized is given by the `--order` argume
 
 3. Mixture of the two above:
 
-Our implementation of the mixture method preserves the sequential nature of the Lexicographic method but introducing a Weighted Average cost function. In each iteration, the prioritized objective function will receive a higher weight than the other two objectives. The remaining weights are going to be equally distributed between the other objectives such that the sum of the weights is 1. We hope that the "soft" evaluation of the cost function allows the algorithm to find a feasible optimal solution when the Lexicographic method fails to do so
+Our implementation of the mixture method preserves the sequential nature of the Lexicographic method but introduces a Weighted Average cost function. In each iteration, the prioritized objective function will receive a higher weight than the other two objectives. The remaining weights are going to be equally distributed between the other objectives such that the sum of the weights is 1. We hope that the "soft" evaluation of the cost function allows the algorithm to find a feasible optimal solution when the Lexicographic method fails to do so
 
 As the Lexicographic method, the mixture uses the `--order` argument. It also uses the `--mixture-weight` argument to determine the weight of the prioritized objective function. The default value is 0.7. The value must be a float between 0.5 and 1.
 
