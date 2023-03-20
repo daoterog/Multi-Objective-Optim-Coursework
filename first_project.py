@@ -151,7 +151,6 @@ def read_data(path: Path) -> Tuple[int, Dict[int, Node]]:
                 paths[node_from.cur_node] = [node_to]
 
             if node_to.cur_node in paths:
-
                 for i, node in enumerate(paths[node_to.cur_node]):
                     # Iterate over the list to check if node_from is already in the list
                     if node.cur_node == node_from.cur_node:
@@ -333,5 +332,8 @@ if __name__ == "__main__":
         shortest_path = lexicographic_method(n_nodes, paths, kwargs)
     else:
         shortest_path = mixture_method(n_nodes, paths, kwargs)
-    print(shortest_path)
+
     print(f"Path: {shortest_path.path}")
+    print(f"Distance: {shortest_path.costs.distance}")
+    print(f"Emission: {shortest_path.costs.emission}")
+    print(f"Risk: {shortest_path.costs.risk}")
