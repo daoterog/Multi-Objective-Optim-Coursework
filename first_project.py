@@ -60,6 +60,10 @@ def arguments_santiy_check(kwargs: dict) -> None:
     if len(kwargs["weights"]) != 3:
         raise ValueError("Weights must have 3 values.")
 
+    for weight in kwargs["weights"]:
+        if weight < 0:
+            raise ValueError("Weights must be positive.")
+
     if len(kwargs["order"]) != 3:
         raise ValueError("Order must have 3 values.")
 
