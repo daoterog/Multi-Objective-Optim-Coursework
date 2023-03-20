@@ -330,3 +330,4 @@ if __name__ == "__main__":
     else:
         shortest_path = mixture_method(n_nodes, paths, kwargs)
     print(shortest_path)
+    print(f"Path: {shortest_path.path}")
