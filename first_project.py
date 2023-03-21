@@ -113,7 +113,9 @@ def parse_arguments() -> dict:
     return kwargs
 
 
-def parse_line(line: str) -> Tuple[Node, Node]:
+def parse_line(
+    line: str, max_costs: Costs, min_costs: Costs
+) -> Tuple[Node, Node, Costs, Costs]:
     """Parse line from csv file and return two nodes."""
 
     # Retrieve data from line
@@ -128,10 +130,23 @@ def parse_line(line: str) -> Tuple[Node, Node]:
     node_from = Node(node_from, costs)
     node_to = Node(node_to, costs)
 
-    return node_from, node_to
+    # Update max and min costs
+    max_costs = Costs(
+        max(max_costs.distance, distance),
+        max(max_costs.emission, emission),
+        max(max_costs.risk, risk),
+    )
+
+    min_costs = Costs(
+        min(min_costs.distance, distance),
+        min(min_costs.emission, emission),
+        min(min_costs.risk, risk),
+    )
+
+    return node_from, node_to, max_costs, min_costs
 
 
-def read_data(path: Path) -> Tuple[int, Dict[int, Node]]:
+def read_data(path: Path) -> Tuple[int, Dict[int, Node], Costs, Costs]:
     """Read data from csv file and return number of node, and path dictionary."""
 
     with open(path, "r") as f:
@@ -140,10 +155,16 @@ def read_data(path: Path) -> Tuple[int, Dict[int, Node]]:
         # Retrieve number of nodes
         n_nodes = int(lines[0].split(",")[0][-3:])
 
+        # Store Max and Min values for each cost
+        max_costs = Costs(-math.inf, -math.inf, -math.inf)
+        min_costs = Costs(math.inf, math.inf, math.inf)
+
         # Create dictionary every possible paths
         paths = {}
         for line in lines[1:]:
-            node_from, node_to = parse_line(line)
+            node_from, node_to, max_costs, min_costs = parse_line(
+                line, max_costs, min_costs
+            )
 
             if node_from.cur_node in paths:
                 paths[node_from.cur_node].append(node_to)
@@ -163,20 +184,50 @@ def read_data(path: Path) -> Tuple[int, Dict[int, Node]]:
             else:
                 paths[node_to.cur_node] = [node_from]
 
-    return n_nodes, paths
+    return n_nodes, paths, max_costs, min_costs
+
+
+def normalize_costs(costs: Costs, max_costs: Costs, min_costs: Costs) -> Costs:
+    """Normalize costs between 0 and 1."""
+
+    # Normalize distance
+    if max_costs.distance == min_costs.distance:
+        distance = 0
+    else:
+        distance = (costs.distance - min_costs.distance) / (
+            max_costs.distance - min_costs.distance
+        )
+
+    # Normalize emission
+    if max_costs.emission == min_costs.emission:
+        emission = 0
+    else:
+        emission = (costs.emission - min_costs.emission) / (
+            max_costs.emission - min_costs.emission
+        )
+
+    # Normalize risk
+    if max_costs.risk == min_costs.risk:
+        risk = 0
+    else:
+        risk = (costs.risk - min_costs.risk) / (max_costs.risk - min_costs.risk)
+
+    return Costs(distance, emission, risk)
 
 
 def create_new_path(
     cur_path: PathToNode,
     to_node: Node,
     cost_method: str,
+    max_costs: Costs,
+    min_costs: Costs,
     weights: List[float] = [],
     constraints: List[float] = [],
 ) -> Tuple[PathToNode, Optional[bool]]:
     """Create new path to node."""
 
     # Recalculating costs with new node
-    new_costs = cur_path.costs + to_node.costs
+    new_costs = cur_path.costs + normalize_costs(to_node.costs, max_costs, min_costs)
 
     # Computing weighted average
     new_total_cost = (
@@ -228,6 +279,10 @@ def dijkstra(end_node: int, paths: Dict[int, Node], cost_kwargs: dict) -> PathTo
         cur_path = heapq.heappop(priority_queue)
         cur_node = cur_path.cur_node
 
+        if cur_node == end_node:
+            # Return path if it reaches the end node
+            return cur_path
+
         if cur_node not in visited:
             #  Explore if node has not been visited
             visited.add(cur_node)
@@ -241,9 +296,6 @@ def dijkstra(end_node: int, paths: Dict[int, Node], cost_kwargs: dict) -> PathTo
                     if not is_feasible:
                         # Continue exploring other paths if new path is not feasible
                         continue
-                    if new_path.cur_node == end_node:
-                        # Return path if it reaches the end node
-                        return new_path
                     # Add new path to priority queue only if it is feasible and has not
                     # reached the end node yet
                     heapq.heappush(priority_queue, new_path)
@@ -325,7 +377,12 @@ def mixture_method(end_node: int, paths: Dict[int, Node], kwargs: dict) -> PathT
 
 if __name__ == "__main__":
     kwargs = parse_arguments()
-    n_nodes, paths = read_data(DATA_PATH)
+    n_nodes, paths, max_costs, min_costs = read_data(DATA_PATH)
+
+    # Add max and min costs to kwargs
+    kwargs["max_costs"] = max_costs
+    kwargs["min_costs"] = min_costs
+
     if kwargs["cost_method"] == "weighted":
         shortest_path = dijkstra(n_nodes, paths, kwargs)
     elif kwargs["cost_method"] == "lexic":
