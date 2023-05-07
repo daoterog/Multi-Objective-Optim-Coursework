@@ -1,11 +1,13 @@
 import argparse
 import heapq
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict, Tuple, List, Optional
 import math
-import pandas as pd 
+from dataclasses import dataclass
 from itertools import permutations
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
 
 DATA_PATH = Path.cwd() / "data" / "SPP.csv"
 VALID_COST_METHODS = {"weighted", "lexic", "mixture"}
@@ -115,7 +117,9 @@ def parse_arguments() -> dict:
     return kwargs
 
 
-def parse_line(line: str) -> Tuple[Node, Node]:
+def parse_line(
+    line: str, max_costs: Costs, min_costs: Costs
+) -> Tuple[Node, Node, Costs, Costs]:
     """Parse line from csv file and return two nodes."""
 
     # Retrieve data from line
@@ -130,10 +134,23 @@ def parse_line(line: str) -> Tuple[Node, Node]:
     node_from = Node(node_from, costs)
     node_to = Node(node_to, costs)
 
-    return node_from, node_to
+    # Update max and min costs
+    max_costs = Costs(
+        max(max_costs.distance, distance),
+        max(max_costs.emission, emission),
+        max(max_costs.risk, risk),
+    )
+
+    min_costs = Costs(
+        min(min_costs.distance, distance),
+        min(min_costs.emission, emission),
+        min(min_costs.risk, risk),
+    )
+
+    return node_from, node_to, max_costs, min_costs
 
 
-def read_data(path: Path) -> Tuple[int, Dict[int, Node]]:
+def read_data(path: Path) -> Tuple[int, Dict[int, Node], Costs, Costs]:
     """Read data from csv file and return number of node, and path dictionary."""
 
     with open(path, "r") as f:
@@ -142,10 +159,16 @@ def read_data(path: Path) -> Tuple[int, Dict[int, Node]]:
         # Retrieve number of nodes
         n_nodes = int(lines[0].split(",")[0][-3:])
 
+        # Store Max and Min values for each cost
+        max_costs = Costs(-math.inf, -math.inf, -math.inf)
+        min_costs = Costs(math.inf, math.inf, math.inf)
+
         # Create dictionary every possible paths
         paths = {}
         for line in lines[1:]:
-            node_from, node_to = parse_line(line)
+            node_from, node_to, max_costs, min_costs = parse_line(
+                line, max_costs, min_costs
+            )
 
             if node_from.cur_node in paths:
                 paths[node_from.cur_node].append(node_to)
@@ -153,7 +176,6 @@ def read_data(path: Path) -> Tuple[int, Dict[int, Node]]:
                 paths[node_from.cur_node] = [node_to]
 
             if node_to.cur_node in paths:
-
                 for i, node in enumerate(paths[node_to.cur_node]):
                     # Iterate over the list to check if node_from is already in the list
                     if node.cur_node == node_from.cur_node:
@@ -166,20 +188,50 @@ def read_data(path: Path) -> Tuple[int, Dict[int, Node]]:
             else:
                 paths[node_to.cur_node] = [node_from]
 
-    return n_nodes, paths
+    return n_nodes, paths, max_costs, min_costs
+
+
+def normalize_costs(costs: Costs, max_costs: Costs, min_costs: Costs) -> Costs:
+    """Normalize costs between 0 and 1."""
+
+    # Normalize distance
+    if max_costs.distance == min_costs.distance:
+        distance = 0
+    else:
+        distance = (costs.distance - min_costs.distance) / (
+            max_costs.distance - min_costs.distance
+        )
+
+    # Normalize emission
+    if max_costs.emission == min_costs.emission:
+        emission = 0
+    else:
+        emission = (costs.emission - min_costs.emission) / (
+            max_costs.emission - min_costs.emission
+        )
+
+    # Normalize risk
+    if max_costs.risk == min_costs.risk:
+        risk = 0
+    else:
+        risk = (costs.risk - min_costs.risk) / (max_costs.risk - min_costs.risk)
+
+    return Costs(distance, emission, risk)
 
 
 def create_new_path(
     cur_path: PathToNode,
     to_node: Node,
     cost_method: str,
+    max_costs: Costs,
+    min_costs: Costs,
     weights: List[float] = [],
     constraints: List[float] = [],
 ) -> Tuple[PathToNode, Optional[bool]]:
     """Create new path to node."""
 
     # Recalculating costs with new node
-    new_costs = cur_path.costs + to_node.costs
+    new_costs = cur_path.costs + normalize_costs(to_node.costs, max_costs, min_costs)
 
     # Computing weighted average
     new_total_cost = (
@@ -328,12 +380,13 @@ def mixture_method(end_node: int, paths: Dict[int, Node], kwargs: dict) -> PathT
 
 def normalize_weigth(weight):
     """Normalize weights."""
-    return  [round(w / sum(weight), 3) for w in weight]
+    return [round(w / sum(weight), 3) for w in weight]
+
 
 def experimentation(n_nodes, paths, kwargs):
     """Run experiments to compare the performance of the algorithms."""
     table_results = []
-    if kwargs["cost_method"] == "mixture":   
+    if kwargs["cost_method"] == "mixture":
         perm = list(permutations(kwargs["order"]))
         for w in perm:
             for i in range(5, 10):
@@ -341,44 +394,52 @@ def experimentation(n_nodes, paths, kwargs):
                 kwargs["order"] = w
                 kwargs["mixture_weight"] = i / 10
 
-                res['order'] = tuple(kwargs["order"])
-                res['mixture_weight'] = kwargs["mixture_weight"]
+                res["order"] = tuple(kwargs["order"])
+                res["mixture_weight"] = kwargs["mixture_weight"]
 
                 shortest_path = mixture_method(n_nodes, paths, kwargs)
-                res['costs'] = tuple(shortest_path.costs.to_list())
+                res["costs"] = tuple(np.round(shortest_path.costs.to_list(), 4))
                 table_results.append(res)
     elif kwargs["cost_method"] == "lexic":
         table_results = []
         perm = list(permutations(kwargs["order"]))
 
         for w in perm:
-                res = {}
-                kwargs["order"] = w
-                res['order'] = tuple(kwargs["order"])
-                shortest_path = lexicographic_method(n_nodes, paths, kwargs)
-                res['costs'] = tuple(shortest_path.costs.to_list())
-                table_results.append(res)
+            res = {}
+            kwargs["order"] = w
+            res["order"] = tuple(kwargs["order"])
+            shortest_path = lexicographic_method(n_nodes, paths, kwargs)
+            res["costs"] = tuple(np.round(shortest_path.costs.to_list(), 4))
+            table_results.append(res)
 
     elif kwargs["cost_method"] == "weighted":
         table_results = []
         for i in list(permutations(range(0, 4), 3)):
-                    
-                    res = {}
-                    kwargs["weights"] = normalize_weigth(i)
-                    res['weights'] = tuple(kwargs["weights"])
-                    shortest_path = dijkstra(n_nodes, paths, kwargs)
-                    res['costs'] = tuple(shortest_path.costs.to_list())
-                    table_results.append(res)
-    
+            res = {}
+            kwargs["weights"] = normalize_weigth(i)
+            res["weights"] = tuple(kwargs["weights"])
+            shortest_path = dijkstra(n_nodes, paths, kwargs)
+            res["costs"] = tuple(np.round(shortest_path.costs.to_list(), 4))
+            table_results.append(res)
+
     return table_results
+
+
 def run_experiments(method):
     """Run experiments to compare the performance of the algorithms."""
-    kwargs = {'cost_method': method,
-             'weights': [0.333, 0.333, 0.333],
-             'order': [1, 2, 3],
-            'mixture_weight': 0.7}
+    kwargs = {
+        "cost_method": method,
+        "weights": [0.333, 0.333, 0.333],
+        "order": [1, 2, 3],
+        "mixture_weight": 0.7,
+    }
 
-    n_nodes, paths = read_data(DATA_PATH)
+    n_nodes, paths, max_costs, min_costs = read_data(DATA_PATH)
+
+    # Add max and min costs to kwargs
+    kwargs["max_costs"] = max_costs
+    kwargs["min_costs"] = min_costs
+
     results = experimentation(n_nodes, paths, kwargs)
     # dict to dataframe
     df = pd.DataFrame(results).to_latex(index=False)
@@ -387,12 +448,17 @@ def run_experiments(method):
 
 if __name__ == "__main__":
     kwargs = parse_arguments()
-    n_nodes, paths = read_data(DATA_PATH)
+    n_nodes, paths, max_costs, min_costs = read_data(DATA_PATH)
+
+    # Add max and min costs to kwargs
+    kwargs["max_costs"] = max_costs
+    kwargs["min_costs"] = min_costs
+
     if kwargs["cost_method"] == "weighted":
         shortest_path = dijkstra(n_nodes, paths, kwargs)
     elif kwargs["cost_method"] == "lexic":
         shortest_path = lexicographic_method(n_nodes, paths, kwargs)
     elif kwargs["cost_method"] == "mixture":
         shortest_path = mixture_method(n_nodes, paths, kwargs)
-    
-    run_experiments('mixture')
+
+    run_experiments("weighted")
