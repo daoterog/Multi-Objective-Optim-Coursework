@@ -1,9 +1,9 @@
 import argparse
 import heapq
+import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Tuple, List, Optional
-import math
+from typing import Dict, List, Optional, Tuple
 
 DATA_PATH = Path.cwd() / "data" / "SPP.csv"
 VALID_COST_METHODS = {"weighted", "lexic", "mixture"}
