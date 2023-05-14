@@ -11,7 +11,7 @@ def parse_args() -> Dict[str, Union[int, float]]:
         "--initial_population", type=int, default=300, help="Initial population size"
     )
     parser.add_argument(
-        "--n_variables", type=int, default=2, help="Number of variables of the problem"
+        "--n_variables", type=int, choices=[2, 15], help="Number of variables of the problem", default=2
     )
     parser.add_argument(
         "--percentage",
@@ -31,6 +31,10 @@ def parse_args() -> Dict[str, Union[int, float]]:
         default=50,
         help="Number of new solutions to generate",
     )
+
+    if args.percentage > 1 or args.percentage < 0:
+        raise ValueError("Percentage must be between 0 and 1")
+
     return vars(parser.parse_args())
 
 
@@ -324,7 +328,7 @@ def plot_solutions(solutions: np.ndarray):
     import matplotlib.pyplot as plt
 
     plt.plot([0, 1], [0, 1])
-    # plt.scatter(solutions[:, 0], solutions[:, 1])
+    plt.scatter(solutions[:, 0], solutions[:, 1])
     plt.show()
 
 
