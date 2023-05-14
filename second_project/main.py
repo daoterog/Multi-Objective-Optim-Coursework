@@ -11,7 +11,11 @@ def parse_args() -> Dict[str, Union[int, float]]:
         "--initial_population", type=int, default=300, help="Initial population size"
     )
     parser.add_argument(
-        "--n_variables", type=int, choices=[2, 15], help="Number of variables of the problem", default=2
+        "--n_variables",
+        type=int,
+        choices=[2, 15],
+        help="Number of variables of the problem",
+        default=2,
     )
     parser.add_argument(
         "--percentage",
@@ -148,7 +152,6 @@ def cross(solutions: np.ndarray, n_cross: np.ndarray) -> np.ndarray:
 
 
 def maximum_spread(first_objective: np.ndarray, second_objetive: np.ndarray) -> float:
-
     acum = 0
     for objective in [first_objective, second_objetive]:
         # Get max and min solution
