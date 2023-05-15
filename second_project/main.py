@@ -36,10 +36,12 @@ def parse_args() -> Dict[str, Union[int, float]]:
         help="Number of new solutions to generate",
     )
 
+    args = parser.parse_args()
+
     if args.percentage > 1 or args.percentage < 0:
         raise ValueError("Percentage must be between 0 and 1")
 
-    return vars(parser.parse_args())
+    return vars(args)
 
 
 def evaluate_objectives(solutions: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -102,8 +104,11 @@ def rank_solutions(
 def selections(
     solutions: np.ndarray, ranking: np.ndarray, percentage: float
 ) -> np.ndarray:
-    if percentage > 1 or percentage < 0:
-        raise ValueError("Percentage must be between 0 and 1")
+    """Selects the best solutions given the ranking of the solutions. The percentage
+    indicates the percentage of solutions to keep. The solutions are selected by
+    selecting the best solutions according to the ranking. The ranking is a vector of
+    shape (n_solutions,) where the smaller the value, the better the solution. The
+    function returns a matrix of shape (n_solutions_to_keep, n_variables)."""
 
     # Cut the solutions according to a percentage
     n_solutions_to_keep = int(percentage * solutions.shape[0])
@@ -115,6 +120,11 @@ def selections(
 
 
 def cross(solutions: np.ndarray, n_cross: np.ndarray) -> np.ndarray:
+    """Crosses the solutions given a matrix of solutions with shape
+    (n_solutions, n_variables) and returns a matrix of shape
+    (n_solutions + n_cross, n_variables). The cross is performed by swapping the
+    variables of two solutions. The number of cross to perform is given by n_cross."""
+
     # Get the indices of the solutions to mutate
     first_permutation = np.random.permutation(solutions.shape[0])[:n_cross]
     second_permutation = np.random.permutation(solutions.shape[0])[:n_cross]
@@ -172,13 +182,18 @@ def maximum_spread(first_objective: np.ndarray, second_objetive: np.ndarray) -> 
 
 
 def generational_distance(
-    pareto_optimal: np.ndarray, non_dominated_solutions: np.ndarray
+    pareto_optimal: np.ndarray,
+    non_dom_first_objective: np.ndarray,
+    non_dom_second_objective: np.ndarray,
 ) -> float:
     """Calculate the non generational distance between the pareto optimal solutions and
     the non dominated solutions. The pareto optimal is a matrix of shape
-    (n_pareto_solutions, 2) and the non dominated solutions is a matrix of shape
-    (n_non_dominated_solutions, 2). The columns of the matrices are the first and second
-    objective respectively."""
+    (n_pareto_solutions, 2)."""
+
+    # Get the non dominated solutions
+    non_dominated_solutions = np.concatenate(
+        [non_dom_first_objective.reshape(-1, 1), non_dom_second_objective.reshape(-1, 1)], axis=1
+    )
 
     def get_minimum_distance(
         pareto_optimal: np.ndarray, non_dominated_solution: np.ndarray
@@ -212,10 +227,10 @@ def hyper_volume(
     first_objective: np.ndarray, second_objective: np.ndarray, nadir_point: np.ndarray
 ) -> float:
     """Calculates the hyper volume of the pareto optimal solutions given the first and
-    second objective of each solution. The hyper volume is the area under the curve
-    formed by the pareto optimal solutions. The pareto optimal is a matrix of shape
-    (n_pareto_solutions, 2). The columns of the matrix are the first and second
-    objective respectively."""
+    second objective of each solution. The hyper volume is the union of the area
+    between the nadir point and the non dominated solutions. The nadir point is a
+    vector of shape (2,). The first and second objective are vectors of shape
+    (n_solutions,)."""
 
     # Sort the pareto optimal solutions by the first objective
     sorted_indices = np.argsort(first_objective)
@@ -235,7 +250,12 @@ def hyper_volume(
 
 
 def evaluate_optimality(
-    population: np.ndarray, generation_i: int, return_mask: bool = False
+    population: np.ndarray,
+    generation_i: int,
+    pareto_optimal: np.ndarray = None,
+    nadir_point: np.ndarray = None,
+    return_mask: bool = False,
+    verbose: bool = True,
 ) -> Optional[np.ndarray]:
     """Evaluates the optimality of the solutions in the population. The optimality is
     evaluated by computing the maximum spread and the hyper volume of the non dominated
@@ -254,25 +274,42 @@ def evaluate_optimality(
     non_dom_first_objective = first_objective[non_dominated_solutions_mask]
     non_dom_second_objective = second_objective[non_dominated_solutions_mask]
 
-    # Compute maximum spread
-    maximum_spread_value = maximum_spread(
-        non_dom_first_objective, non_dom_second_objective
-    )
+    if verbose:
+        # Print generation information
 
-    # Compute Hyper volume
-    hyper_volume_value = hyper_volume(
-        non_dom_first_objective,
-        non_dom_second_objective,
-        np.array([1, 1]),
-    )
+        # Compute maximum spread
+        maximum_spread_value = maximum_spread(
+            non_dom_first_objective, non_dom_second_objective
+        )
 
-    # Print generation information
-    print(
-        f"Generation {generation_i} - Maximum spread: {maximum_spread_value:.2f}"
-        f" - HyperVolume: {hyper_volume_value}, "
-        f"f1 min: {np.min(non_dom_first_objective):.4f}, "
-        f"f2 min: {np.min(non_dom_second_objective):.4f}"
-    )
+        print_message = f"Generation {generation_i} - Maximum spread: {maximum_spread_value:.2f}"
+
+        if pareto_optimal is not None:
+            # Generate pareto optimal solutions
+            generational_distance_value = generational_distance(
+                pareto_optimal,
+                non_dom_first_objective,
+                non_dom_second_objective,
+            )
+
+            print_message += f" - Generational distance: {generational_distance_value:.2f}"
+
+        if nadir_point is not None:
+            # Compute Hyper volume
+            hyper_volume_value = hyper_volume(
+                non_dom_first_objective,
+                non_dom_second_objective,
+                nadir_point,
+            )
+
+            print_message += f" - HyperVolume: {hyper_volume_value}"
+
+        print_message += (
+            f" - f1 min: {np.min(non_dom_first_objective):.4f}"
+            f" - f2 min: {np.min(non_dom_second_objective):.4f}"
+        )
+
+        print(print_message)
 
     if return_mask:
         return non_dominated_solutions_mask
@@ -280,13 +317,15 @@ def evaluate_optimality(
     return ranking
 
 
-def main(
+def run_optimization_pipeline(
     initial_population: int,
     n_variables: int,
     percentage: float,
     n_generations: int,
     n_cross: int,
     n_new_solutions: int,
+    nadir_point: np.ndarray = None,
+    pareto_optimal: np.ndarray = None,
 ) -> np.ndarray:
     # Generate initial population
     population = generate_population(initial_population, n_variables)
@@ -295,7 +334,12 @@ def main(
         # Iterate over the generations
 
         # Evaluate optimality
-        ranking = evaluate_optimality(population, generation_i)
+        ranking = evaluate_optimality(
+            population,
+            generation_i,
+            nadir_point=nadir_point,
+            pareto_optimal=pareto_optimal,
+        )
 
         # Selection
         selected_solutions = selections(population, ranking, percentage=percentage)
@@ -320,11 +364,23 @@ def main(
 
     # Evaluate optimality
     non_dominated_solutions_mask = evaluate_optimality(
-        population, generation_i, return_mask=True
+        population,
+        generation_i,
+        nadir_point=nadir_point,
+        pareto_optimal=pareto_optimal,
+        return_mask=True,
     )
 
     # Return non dominated solutions
     return population[non_dominated_solutions_mask]
+
+
+def make_combinations(n_variables: int) -> np.ndarray:
+    """Makes all the possible combinations of the vector [-1.5, 1.5] with n_variables
+    using a 100 point discretization."""
+    return np.array(
+        np.meshgrid(*[np.linspace(-1.5, 1.5, 100)] * n_variables)
+    ).T.reshape(-1, n_variables)
 
 
 def plot_solutions(solutions: np.ndarray):
@@ -335,20 +391,39 @@ def plot_solutions(solutions: np.ndarray):
     plt.show()
 
 
-def make_combinations(n_variables: int) -> np.ndarray:
-    """Makes all the possible combinations of the vector [-1.5, 1.5] with n_variables
-    using a 100 point discretization."""
-    return np.array(np.meshgrid(*[np.linspace(-1.5, 1.5, 10)] * n_variables)).T.reshape(
-        -1, n_variables
-    )
+def main(args: Dict[str, Union[int, float]]):
+
+    if args["n_variables"] == 2:
+        # Generate pareto optimal solutions
+        solutions = make_combinations(2)
+
+        # Evaluate objectives and constraints
+        first_objective, second_objective = evaluate_objectives(solutions)
+
+        non_dominated_solutions_mask = evaluate_optimality(
+            solutions, generation_i=0, return_mask=True, verbose=False
+        )
+
+        non_dom_first_objective = first_objective[non_dominated_solutions_mask]
+        non_dom_second_objective = second_objective[non_dominated_solutions_mask]
+
+        args["pareto_optimal"] = np.concatenate(
+            [non_dom_first_objective.reshape(-1, 1), non_dom_second_objective.reshape(-1, 1)], axis=1
+        )
+    else:
+
+        raise NotImplementedError("Only 2 variables are supported")
+
+    # Run algorithm
+    solutions = run_optimization_pipeline(**args)
+
+    print(np.unique(solutions, axis=0))
+
+    # plot_solutions(solutions)
 
 
 if __name__ == "__main__":
     # Parse arguments
     args = parse_args()
 
-    solutions = main(args)
-
-    print(np.unique(solutions, axis=0))
-
-    plot_solutions(solutions)
+    main(args)
