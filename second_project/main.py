@@ -410,16 +410,19 @@ def main(args: Dict[str, Union[int, float]]):
         args["pareto_optimal"] = np.concatenate(
             [non_dom_first_objective.reshape(-1, 1), non_dom_second_objective.reshape(-1, 1)], axis=1
         )
+
+        args["nadir_point"] = np.array([6.79, 6.79])
+
     else:
 
-        raise NotImplementedError("Only 2 variables are supported")
+        args["nadir_point"] = np.array([1.0, 1.0])
 
     # Run algorithm
     solutions = run_optimization_pipeline(**args)
 
     print(np.unique(solutions, axis=0))
 
-    # plot_solutions(solutions)
+    plot_solutions(solutions)
 
 
 if __name__ == "__main__":
