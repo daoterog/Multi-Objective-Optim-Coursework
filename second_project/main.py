@@ -1,48 +1,6 @@
-import argparse
 from typing import Tuple, Dict, Union, Optional
 
 import numpy as np
-
-
-def parse_args() -> Dict[str, Union[int, float]]:
-    """Parse the arguments of the program and return a dictionary of arguments."""
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--initial_population", type=int, default=300, help="Initial population size"
-    )
-    parser.add_argument(
-        "--n_variables",
-        type=int,
-        choices=[2, 15],
-        help="Number of variables of the problem",
-        default=2,
-    )
-    parser.add_argument(
-        "--percentage",
-        type=float,
-        default=0.3,
-        help="Percentage of solutions to keep after selection",
-    )
-    parser.add_argument(
-        "--n_generations", type=int, default=80, help="Number of generations to run"
-    )
-    parser.add_argument(
-        "--n_cross", type=int, default=10, help="Number of cross to perform"
-    )
-    parser.add_argument(
-        "--n_new_solutions",
-        type=int,
-        default=50,
-        help="Number of new solutions to generate",
-    )
-
-    args = parser.parse_args()
-
-    if args.percentage > 1 or args.percentage < 0:
-        raise ValueError("Percentage must be between 0 and 1")
-
-    return vars(args)
-
 
 def evaluate_objectives(solutions: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Evaluates and returns both objectives of the problem given a matrix of solutions
@@ -249,6 +207,11 @@ def hyper_volume(
     return acum
 
 
+import pandas as pd
+
+# Create an empty dataframe to store the information
+df = pd.DataFrame(columns=["Generation", "Maximum Spread", "HyperVolume", "f1 min", "f2 min"])
+
 def evaluate_optimality(
     population: np.ndarray,
     generation_i: int,
@@ -309,7 +272,10 @@ def evaluate_optimality(
             f" - f2 min: {np.min(non_dom_second_objective):.4f}"
         )
 
-        print(print_message)
+        print(print_message)        
+
+        # Append the relevant information to the dataframe
+        df.loc[generation_i] = [generation_i, maximum_spread_value, hyper_volume_value, np.min(non_dom_first_objective), np.min(non_dom_second_objective)]
 
     if return_mask:
         return non_dominated_solutions_mask
@@ -326,6 +292,7 @@ def run_optimization_pipeline(
     n_new_solutions: int,
     nadir_point: np.ndarray = None,
     pareto_optimal: np.ndarray = None,
+    ideal_point: np.ndarray = None
 ) -> np.ndarray:
     # Generate initial population
     population = generate_population(initial_population, n_variables)
@@ -383,11 +350,20 @@ def make_combinations(n_variables: int) -> np.ndarray:
     ).T.reshape(-1, n_variables)
 
 
-def plot_solutions(solutions: np.ndarray):
+def plot_solutions(solutions: np.ndarray, pareto_optimal: np.ndarray = None, nadir_point: np.ndarray = None, ideal_point: np.ndarray = None):
     import matplotlib.pyplot as plt
-
-    plt.plot([0, 1], [0, 1])
-    plt.scatter(solutions[:, 0], solutions[:, 1])
+    if pareto_optimal is not None:
+        plt.scatter(pareto_optimal[:, 0], pareto_optimal[:, 1], c="g", label = "Pareto optimal", marker="*")
+    if nadir_point is not None:
+        plt.scatter(nadir_point[0], nadir_point[1], c="r", label = "Nadir point")
+    if ideal_point is not None:
+        plt.scatter(ideal_point[0], ideal_point[1], c="y", label = "Ideal point")
+    plt.scatter(solutions[:, 0], solutions[:, 1], c="b", label = "Solutions", marker="x")
+    plt.xlabel("Z1")
+    plt.ylabel("Z2")
+    plt.title("Pareto front")
+    plt.legend()
+    plt.grid()
     plt.show()
 
 
@@ -412,21 +388,42 @@ def main(args: Dict[str, Union[int, float]]):
         )
 
         args["nadir_point"] = np.array([6.79, 6.79])
+        args["ideal_point"] = np.array([0.013, 0.013])
 
     else:
 
         args["nadir_point"] = np.array([1.0, 1.0])
+        args["pareto_optimal"] = None
+        args["ideal_point"] = np.array([0, 0])
 
     # Run algorithm
     solutions = run_optimization_pipeline(**args)
 
-    print(np.unique(solutions, axis=0))
+    unique_solutions = np.unique(solutions, axis=0)
 
-    plot_solutions(solutions)
+    first_objective, second_objective = evaluate_objectives(unique_solutions)
+
+    objective_matrix = np.concatenate(
+        [first_objective.reshape(-1, 1), second_objective.reshape(-1, 1)], axis=1
+    )
+
+    plot_solutions(
+        objective_matrix,
+        pareto_optimal=args["pareto_optimal"],
+        nadir_point= args["nadir_point"],
+        ideal_point= args["ideal_point"]
+    )
 
 
 if __name__ == "__main__":
     # Parse arguments
-    args = parse_args()
+    args = {
+        "initial_population": 300,
+        "n_variables": 2,
+        "percentage": 0.2,
+        "n_generations":25,
+        "n_cross":20,
+        "n_new_solutions": 50
+    }
 
     main(args)
